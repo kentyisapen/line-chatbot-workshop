@@ -170,79 +170,153 @@ class LineController extends Controller
     {
         $data = $event['postback']['data'] ?? '';
 
-        if ($data === 'action=start_consultation') {
-            // 「受診を開始する」アクションの処理
-            $user->update(['state' => 'started_consultation']);
+        // ユーザーの現在の状態を取得
+        $currentState = $user->state;
 
+        // 状態が 'started_consultation' でない場合、アクションに反応しない
+        if ($currentState !== 'started_consultation' && $data !== "action=start_consultation") {
+            // 必要に応じて、何もしないか、特定のメッセージを送信
             $this->replyMessage($event['replyToken'], [
                 [
-                    'type' => 'template',
-                    'altText' => '救急受診ガイド',
-                    'template' => [
-                        'type' => 'buttons',
-                        'title' => '救急受診ガイド',
-                        'text' => '以下の選択肢から選んでください。',
-                        'actions' => [
-                            [
-                                'type' => 'postback',
-                                'label' => '呼びかけても反応がない',
-                                'data' => 'action=call_no_response',
-                            ],
-                            [
-                                'type' => 'postback',
-                                'label' => 'それ以外',
-                                'data' => 'action=other_situation',
+                    'type' => 'text',
+                    'text' => '現在、受診ガイドが開始されていません。「受診を開始する」を押してください。',
+                ],
+            ]);
+            return;
+        }
+
+        // アクションデータと対応するラベルのマッピング
+        $actionLabels = [
+            'start_consultation' => '受診を開始する',
+            'interrupt_consultation' => '受診を中断する',
+            'call_no_response' => '呼びかけても反応がない',
+            'other_situation' => 'それ以外',
+        ];
+
+        // アクションに対応するラベルを取得
+        $actionLabel = $actionLabels[$data] ?? '未知のアクション';
+
+        switch ($data) {
+            case 'action=start_consultation':
+                // 「受診を開始する」アクションの処理
+                $user->update(['state' => 'started_consultation']);
+
+                $this->replyMessage($event['replyToken'], [
+                    [
+                        'type' => 'template',
+                        'altText' => '救急受診ガイド',
+                        'template' => [
+                            'type' => 'buttons',
+                            'title' => '救急受診ガイド',
+                            'text' => '以下の選択肢から選んでください。',
+                            'actions' => [
+                                [
+                                    'type' => 'postback',
+                                    'label' => '呼びかけても反応がない',
+                                    'data' => 'action=call_no_response',
+                                ],
+                                [
+                                    'type' => 'postback',
+                                    'label' => 'それ以外',
+                                    'data' => 'action=other_situation',
+                                ],
                             ],
                         ],
                     ],
-                ],
-            ]);
+                ]);
 
-            // リッチメニューを「受診を中断する」に切り替え
-            $this->linkRichMenu($user->user_id, 'interrupt_consultation');
+                // リッチメニューを「受診を中断する」に切り替え
+                $this->linkRichMenu($user->user_id, 'interrupt_consultation');
 
-        } elseif ($data === 'action=interrupt_consultation') {
-            // 「受診を中断する」アクションの処理
-            $user->update(['state' => 'idle']);
+                // ユーザーが押したボタンのラベルをメッセージとして表示
+                $this->replyMessage($event['replyToken'], [
+                    [
+                        'type' => 'text',
+                        'text' => "あなたは「{$actionLabel}」を選択しました。",
+                    ],
+                ]);
 
-            $this->replyMessage($event['replyToken'], [
-                [
-                    'type' => 'text',
-                    'text' => '受診を中断しました。',
-                ],
-            ]);
+                break;
 
-            // リッチメニューを「受診を開始する」に戻す
-            $this->linkRichMenu($user->user_id, 'start_consultation');
+            case 'action=interrupt_consultation':
+                // 「受診を中断する」アクションの処理
+                $user->update(['state' => 'idle']);
 
-        } elseif ($data === 'action=call_no_response') {
-            // 「119を呼びましょう」という返信
-            $this->replyMessage($event['replyToken'], [
-                [
-                    'type' => 'text',
-                    'text' => '119を呼びましょう。',
-                ],
-            ]);
+                $this->replyMessage($event['replyToken'], [
+                    [
+                        'type' => 'text',
+                        'text' => '受診を中断しました。',
+                    ],
+                ]);
 
-            // リッチメニューを「受診を開始する」に戻す
-            $this->linkRichMenu($user->user_id, 'start_consultation');
-            $user->update(['state' => 'idle']);
+                // リッチメニューを「受診を開始する」に戻す
+                $this->linkRichMenu($user->user_id, 'start_consultation');
 
-        } elseif ($data === 'action=other_situation') {
-            // 「様子を見ましょう」という返信
-            $this->replyMessage($event['replyToken'], [
-                [
-                    'type' => 'text',
-                    'text' => '様子を見ましょう。',
-                ],
-            ]);
+                // ユーザーが押したボタンのラベルをメッセージとして表示
+                $this->replyMessage($event['replyToken'], [
+                    [
+                        'type' => 'text',
+                        'text' => "あなたは「{$actionLabel}」を選択しました。",
+                    ],
+                ]);
 
-            // リッチメニューを「受診を開始する」に戻す
-            $this->linkRichMenu($user->user_id, 'start_consultation');
-            $user->update(['state' => 'idle']);
+                break;
 
-        } else {
-            Log::info("Unhandled postback data: {$data}");
+            case 'action=call_no_response':
+                // 「119を呼びましょう」という返信
+                $this->replyMessage($event['replyToken'], [
+                    [
+                        'type' => 'text',
+                        'text' => '119を呼びましょう。',
+                    ],
+                ]);
+
+                // リッチメニューを「受診を開始する」に戻す
+                $this->linkRichMenu($user->user_id, 'start_consultation');
+                $user->update(['state' => 'idle']);
+
+                // ユーザーが押したボタンのラベルをメッセージとして表示
+                $this->replyMessage($event['replyToken'], [
+                    [
+                        'type' => 'text',
+                        'text' => "あなたは「{$actionLabel}」を選択しました。",
+                    ],
+                ]);
+
+                break;
+
+            case 'action=other_situation':
+                // 「様子を見ましょう」という返信
+                $this->replyMessage($event['replyToken'], [
+                    [
+                        'type' => 'text',
+                        'text' => '様子を見ましょう。',
+                    ],
+                ]);
+
+                // リッチメニューを「受診を開始する」に戻す
+                $this->linkRichMenu($user->user_id, 'start_consultation');
+                $user->update(['state' => 'idle']);
+
+                // ユーザーが押したボタンのラベルをメッセージとして表示
+                $this->replyMessage($event['replyToken'], [
+                    [
+                        'type' => 'text',
+                        'text' => "あなたは「{$actionLabel}」を選択しました。",
+                    ],
+                ]);
+
+                break;
+
+            default:
+                Log::info("Unhandled postback data: {$data}");
+                // 必要に応じて、ユーザーにエラーメッセージを送信
+                $this->replyMessage($event['replyToken'], [
+                    [
+                        'type' => 'text',
+                        'text' => '不明な操作が行われました。',
+                    ],
+                ]);
         }
     }
 
