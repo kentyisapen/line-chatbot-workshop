@@ -15,14 +15,14 @@ class RegisterRichMenus extends Command
      *
      * @var string
      */
-    protected $signature = 'line:register-rich-menus';
+    protected $signature = 'line:register-rich-menus {--force}';
 
     /**
      * The console command description.
      *
      * @var string
      */
-    protected $description = 'Register rich menus for LINE bot';
+    protected $description = 'Register and upload rich menus for LINE bot';
 
     /**
      * Execute the console command.
@@ -49,7 +49,8 @@ class RegisterRichMenus extends Command
                     'height' => 1686,
                 ],
                 'selected' => false,
-                'chatBarText' => '受診を開始する',
+                'name_display' => '受診を開始する',
+                'chat_bar_text' => '受診を開始する',
                 'areas' => [
                     [
                         'bounds' => [
@@ -73,7 +74,8 @@ class RegisterRichMenus extends Command
                     'height' => 1686,
                 ],
                 'selected' => false,
-                'chatBarText' => '受診を中断する',
+                'name_display' => '受診を中断する',
+                'chat_bar_text' => '受診を中断する',
                 'areas' => [
                     [
                         'bounds' => [
@@ -96,8 +98,14 @@ class RegisterRichMenus extends Command
             // 既に登録されているか確認
             $existingMenu = RichMenu::where('name', $menu['name'])->first();
 
-            if ($existingMenu && $existingMenu->rich_menu_id) {
+            if ($existingMenu) {
                 $this->info("Rich menu '{$menu['name']}' already exists with ID {$existingMenu->rich_menu_id}.");
+
+                // --force オプションが指定されている場合、画像を再アップロード
+                if ($this->option('force')) {
+                    $this->uploadRichMenuImage($existingMenu, $channelAccessToken);
+                }
+
                 continue;
             }
 
@@ -112,30 +120,13 @@ class RegisterRichMenus extends Command
                 $this->info("Rich menu '{$menu['name']}' created with ID {$richMenuId}.");
 
                 // データベースに保存
-                RichMenu::updateOrCreate(
-                    ['name' => $menu['name']],
-                    ['rich_menu_id' => $richMenuId]
-                );
+                $richMenu = RichMenu::create([
+                    'name' => $menu['name'],
+                    'rich_menu_id' => $richMenuId,
+                ]);
 
                 // 画像のアップロード
-                $imagePath = "rich_menu_images/{$menu['name']}.jpg"; // 画像はresources/rich_menu_imagesに配置
-                if (!Storage::exists($imagePath)) {
-                    $this->error("Image for rich menu '{$menu['name']}' not found at storage/app/{$imagePath}.");
-                    continue;
-                }
-
-                $imageContent = Storage::get($imagePath);
-
-                $imageResponse = Http::withHeaders([
-                    'Authorization' => 'Bearer ' . $channelAccessToken,
-                    'Content-Type' => 'image/png',
-                ])->post("https://api.line.me/v2/bot/richmenu/{$richMenuId}/content", $imageContent);
-
-                if ($imageResponse->successful()) {
-                    $this->info("Image uploaded for rich menu '{$menu['name']}'.");
-                } else {
-                    $this->error("Failed to upload image for rich menu '{$menu['name']}'. Response: " . $imageResponse->body());
-                }
+                $this->uploadRichMenuImage($richMenu, $channelAccessToken);
             } else {
                 $this->error("Failed to create rich menu '{$menu['name']}'. Response: " . $response->body());
             }
@@ -144,5 +135,33 @@ class RegisterRichMenus extends Command
         $this->info('Rich menu registration completed.');
 
         return 0;
+    }
+
+    /**
+     * リッチメニューに画像をアップロードする
+     */
+    private function uploadRichMenuImage(RichMenu $richMenu, $channelAccessToken)
+    {
+        $imagePath = "rich_menu_images/{$richMenu->name}.jpg";
+    
+        // 'local' ディスクを明示的に指定
+        if (!Storage::disk('local')->exists($imagePath)) {
+            $this->error("Image for rich menu '{$richMenu->name}' not found at storage/app/{$imagePath}.");
+            return;
+        }
+    
+        $imageContent = Storage::disk('local')->get($imagePath);
+    
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $channelAccessToken,
+            'Content-Type' => 'image/jpeg', 
+        ])->withBody($imageContent, 'image/jpeg') 
+          ->post("https://api-data.line.me/v2/bot/richmenu/{$richMenu->rich_menu_id}/content");
+    
+        if ($response->successful()) {
+            $this->info("Image uploaded for rich menu '{$richMenu->name}'.");
+        } else {
+            $this->error("Failed to upload image for rich menu '{$richMenu->name}'. Response: " . $response->body());
+        }
     }
 }

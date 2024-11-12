@@ -6,6 +6,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
+use App\Models\RichMenu;
+use App\Models\User;
 
 class LineController extends Controller
 {
@@ -50,22 +52,221 @@ class LineController extends Controller
                 $replyToken = $event['replyToken'];
 
                 // 返信メッセージの作成
-                $responseMessage = [
-                    'replyToken' => $replyToken,
-                    'messages' => [
+                $responseMessage = 
                         [
                             'type' => 'text',
                             'text' => 'Hello World!'
-                        ]
-                    ]
-                ];
+                        ];
 
                 // LINE Messaging APIにリプライ
-                $this->replyMessage($responseMessage);
+                $this->replyMessage($replyToken, $responseMessage);
             }
         }
 
         return response('OK', 200);
+    }
+
+    public function webhook3(Request $request)
+    {
+        // ログにリクエスト内容を出力（デバッグ用）
+        Log::debug($request);
+
+        $body = $request->getContent();
+        $signature = $request->header('X-Line-Signature');
+
+        if (!$this->isSignatureValid($body, $signature)) {
+            Log::warning('Invalid signature.');
+            return response('Invalid signature', 400);
+        }
+
+        $events = json_decode($body, true)['events'] ?? [];
+
+        foreach ($events as $event) {
+            $userId = $event['source']['userId'] ?? null;
+
+            if (!$userId) {
+                continue;
+            }
+
+            // ユーザーを取得または作成
+            $user = User::firstOrCreate(
+                ['user_id' => $userId],
+                ['state' => 'idle']
+            );
+
+            switch ($event['type']) {
+                case 'follow':
+                    $this->handleFollow($user, $event);
+                    break;
+
+                case 'unfollow':
+                    $this->handleUnfollow($user, $event);
+                    break;
+
+                case 'message':
+                    $this->handleMessage($user, $event);
+                    break;
+
+                case 'postback':
+                    $this->handlePostback($user, $event);
+                    break;
+
+                default:
+                    Log::info("Unhandled event type: {$event['type']}");
+            }
+        }
+
+        return response('OK', 200);
+    }
+
+    private function handleFollow(User $user, $event)
+    {
+        Log::info("User {$user->user_id} followed the bot.");
+        Log::info($event);
+
+        // 初期メッセージを送信
+        $this->replyMessage($event['replyToken'], [
+            [
+                'type' => 'text',
+                'text' => '友達登録ありがとうございます！「受診を開始する」を選択してください。',
+            ],
+        ]);
+
+        // 「受診を開始する」リッチメニューを割り当て
+        $this->linkRichMenu($user->user_id, 'start_consultation');
+    }
+
+    private function handleUnfollow(User $user, $event)
+    {
+        Log::info("User {$user->user_id} unfollowed the bot.");
+        // 必要に応じて、ユーザー情報を更新または削除
+    }
+
+    private function handleMessage(User $user, $event)
+    {
+        $message = $event['message']['text'] ?? '';
+
+        // 現在のユーザー状態に基づいて処理を分岐
+        if ($user->state === 'idle') {
+            // 状態がidleの場合の処理（必要に応じて実装）
+            $this->replyMessage($event['replyToken'], [
+                [
+                    'type' => 'text',
+                    'text' => '「受診を開始する」を選択してください。',
+                ],
+            ]);
+        } else {
+            // 他の状態の場合の処理（必要に応じて実装）
+            $this->replyMessage($event['replyToken'], [
+                [
+                    'type' => 'text',
+                    'text' => '現在、他の操作を行っています。しばらくお待ちください。',
+                ],
+            ]);
+        }
+    }
+
+    private function handlePostback(User $user, $event)
+    {
+        $data = $event['postback']['data'] ?? '';
+
+        if ($data === 'action=start_consultation') {
+            // 「受診を開始する」アクションの処理
+            $user->update(['state' => 'started_consultation']);
+
+            $this->replyMessage($event['replyToken'], [
+                [
+                    'type' => 'template',
+                    'altText' => '救急受診ガイド',
+                    'template' => [
+                        'type' => 'buttons',
+                        'title' => '救急受診ガイド',
+                        'text' => '以下の選択肢から選んでください。',
+                        'actions' => [
+                            [
+                                'type' => 'postback',
+                                'label' => '呼びかけても反応がない',
+                                'data' => 'action=call_no_response',
+                            ],
+                            [
+                                'type' => 'postback',
+                                'label' => 'それ以外',
+                                'data' => 'action=other_situation',
+                            ],
+                        ],
+                    ],
+                ],
+            ]);
+
+            // リッチメニューを「受診を中断する」に切り替え
+            $this->linkRichMenu($user->user_id, 'interrupt_consultation');
+
+        } elseif ($data === 'action=interrupt_consultation') {
+            // 「受診を中断する」アクションの処理
+            $user->update(['state' => 'idle']);
+
+            $this->replyMessage($event['replyToken'], [
+                [
+                    'type' => 'text',
+                    'text' => '受診を中断しました。',
+                ],
+            ]);
+
+            // リッチメニューを「受診を開始する」に戻す
+            $this->linkRichMenu($user->user_id, 'start_consultation');
+
+        } elseif ($data === 'action=call_no_response') {
+            // 「119を呼びましょう」という返信
+            $this->replyMessage($event['replyToken'], [
+                [
+                    'type' => 'text',
+                    'text' => '119を呼びましょう。',
+                ],
+            ]);
+
+            // リッチメニューを「受診を開始する」に戻す
+            $this->linkRichMenu($user->user_id, 'start_consultation');
+            $user->update(['state' => 'idle']);
+
+        } elseif ($data === 'action=other_situation') {
+            // 「様子を見ましょう」という返信
+            $this->replyMessage($event['replyToken'], [
+                [
+                    'type' => 'text',
+                    'text' => '様子を見ましょう。',
+                ],
+            ]);
+
+            // リッチメニューを「受診を開始する」に戻す
+            $this->linkRichMenu($user->user_id, 'start_consultation');
+            $user->update(['state' => 'idle']);
+
+        } else {
+            Log::info("Unhandled postback data: {$data}");
+        }
+    }
+
+    /**
+     * リッチメニューをユーザーにリンクする
+     */
+    private function linkRichMenu($userId, $menuName)
+    {
+        $richMenu = RichMenu::where('name', $menuName)->first();
+
+        if (!$richMenu || !$richMenu->rich_menu_id) {
+            Log::error("Rich menu '{$menuName}' not found or not registered.");
+            return;
+        }
+
+        $response = Http::withHeaders([
+            'Authorization' => 'Bearer ' . $this->channelAccessToken,
+        ])->post("https://api.line.me/v2/bot/user/{$userId}/richmenu/{$richMenu->rich_menu_id}");
+
+        if ($response->successful()) {
+            Log::info("Rich menu '{$menuName}' linked to user {$userId}.");
+        } else {
+            Log::error("Failed to link rich menu '{$menuName}' to user {$userId}. Response: " . $response->body());
+        }
     }
 
 
@@ -82,12 +283,15 @@ class LineController extends Controller
     /**
      * LINE Messaging APIにメッセージを返信する
      */
-    private function replyMessage($message)
+    private function replyMessage($replyToken, $messages)
     {
         $response = Http::withHeaders([
             'Content-Type' => 'application/json',
             'Authorization' => 'Bearer ' . $this->channelAccessToken,
-        ])->post('https://api.line.me/v2/bot/message/reply', $message);
+        ])->post('https://api.line.me/v2/bot/message/reply', [
+            'replyToken' => $replyToken,
+            'messages' => $messages,
+        ]);
 
         if ($response->failed()) {
             Log::error('Failed to send reply:', [
@@ -98,4 +302,5 @@ class LineController extends Controller
             Log::debug('Reply sent successfully.');
         }
     }
+
 }
