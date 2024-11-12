@@ -13,7 +13,10 @@ return new class extends Migration
     {
         Schema::create('rich_menus', function (Blueprint $table) {
             $table->id();
+            $table->string('name');
+            $table->string('rich_menu_id')->nullable(); // LINEから返されるリッチメニューID
             $table->timestamps();
+            $table->unique('name');
         });
     }
 

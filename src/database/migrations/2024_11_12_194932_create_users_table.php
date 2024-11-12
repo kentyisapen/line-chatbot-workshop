@@ -13,7 +13,10 @@ return new class extends Migration
     {
         Schema::create('users', function (Blueprint $table) {
             $table->id();
+            $table->string('user_id'); // LINEのユーザーID
+            $table->string('state')->default('idle'); // ユーザーの状態
             $table->timestamps();
+            $table->unique('user_id');
         });
     }
 
