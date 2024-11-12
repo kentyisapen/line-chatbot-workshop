@@ -52,11 +52,12 @@ class LineController extends Controller
                 $replyToken = $event['replyToken'];
 
                 // 返信メッセージの作成
-                $responseMessage = 
+                $responseMessage = [
                         [
                             'type' => 'text',
                             'text' => 'Hello World!'
-                        ];
+                        ]
+                ];
 
                 // LINE Messaging APIにリプライ
                 $this->replyMessage($replyToken, $responseMessage);
