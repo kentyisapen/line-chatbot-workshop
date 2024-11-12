@@ -1,0 +1,9 @@
+services:
+  app:
+    image: php:8.3-cli-bullseye
+    ports:
+      - "8222:8222"
+    volumes:
+      - ./src:/app
+    working_dir: /app
+    command: php artisan serve --host=0.0.0.0 --port=8222
