@@ -66,6 +66,39 @@ class LineController extends Controller
         return response('OK', 200);
     }
 
+        /**
+     * LINEの署名を検証する
+     */
+    private function isSignatureValid($body, $signature)
+    {
+        $hash = hash_hmac('sha256', $body, $this->channelSecret, true);
+        $expectedSignature = base64_encode($hash);
+        return hash_equals($expectedSignature, $signature);
+    }
+
+    /**
+     * LINE Messaging APIにメッセージを返信する
+     */
+    private function replyMessage($replyToken, $messages)
+    {
+        $response = Http::withHeaders([
+            'Content-Type' => 'application/json',
+            'Authorization' => 'Bearer ' . $this->channelAccessToken,
+        ])->post('https://api.line.me/v2/bot/message/reply', [
+            'replyToken' => $replyToken,
+            'messages' => $messages,
+        ]);
+
+        if ($response->failed()) {
+            Log::error('Failed to send reply:', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+        } else {
+            Log::debug('Reply sent successfully.');
+        }
+    }
+
     public function webhook3(Request $request)
     {
         // ログにリクエスト内容を出力（デバッグ用）
@@ -342,39 +375,4 @@ class LineController extends Controller
             Log::error("Failed to link rich menu '{$menuName}' to user {$userId}. Response: " . $response->body());
         }
     }
-
-
-    /**
-     * LINEの署名を検証する
-     */
-    private function isSignatureValid($body, $signature)
-    {
-        $hash = hash_hmac('sha256', $body, $this->channelSecret, true);
-        $expectedSignature = base64_encode($hash);
-        return hash_equals($expectedSignature, $signature);
-    }
-
-    /**
-     * LINE Messaging APIにメッセージを返信する
-     */
-    private function replyMessage($replyToken, $messages)
-    {
-        $response = Http::withHeaders([
-            'Content-Type' => 'application/json',
-            'Authorization' => 'Bearer ' . $this->channelAccessToken,
-        ])->post('https://api.line.me/v2/bot/message/reply', [
-            'replyToken' => $replyToken,
-            'messages' => $messages,
-        ]);
-
-        if ($response->failed()) {
-            Log::error('Failed to send reply:', [
-                'status' => $response->status(),
-                'body' => $response->body(),
-            ]);
-        } else {
-            Log::debug('Reply sent successfully.');
-        }
-    }
-
 }
