@@ -18,6 +18,7 @@ class LineController extends Controller
         $this->channelSecret = env('LINE_CHANNEL_SECRET');
     }
 
+    // 疎通確認
     public function webhook(Request $request, Response $response) {
         Log::debug($request);
 
@@ -26,6 +27,7 @@ class LineController extends Controller
         ]);
     }
 
+    // 返信テスト(+署名検証)
     public function webhook2(Request $request, Response $response) {
         // リクエストボディを取得
         $body = $request->getContent();
